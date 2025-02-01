@@ -13,133 +13,11 @@ import { Star, Calendar, ChevronRight, Search, User, LogOut, MoreVertical, X } f
 import { Link } from 'react-router-dom';
 import { db } from '../firebase/firebase'; // Your Firebase config
 import { doc, setDoc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import Sidebar from '../Components/Sidebar';
+import GameSection from '../Components/GameSection';
+import HeroSection from '../Components/HeroSection';
 
 
-
-const Sidebar = ({ user, onLogout, isOpen, onClose }) => (
-  <div
-    className={`fixed top-0 left-0 z-10 h-screen w-64 bg-[#1C1C1C] border-r border-[#2ECC71]/20 transition-transform transform ${isOpen ? 'translate-x-0' : '-translate-x-full'
-      }`}
-  >
-    <div className="p-6 relative">
-      <button
-        onClick={onClose}
-        className="absolute right-4 top-4 text-[#2ECC71] hover:text-[#01FF70] transition"
-      >
-        <X size={24} />
-      </button>
-
-      <h2 className="text-2xl font-bold text-[#2ECC71] mb-8">Big Dawgs</h2>
-
-      {user ? (
-        <div className="space-y-6">
-          <div className="space-y-3">
-            {user.photoURL && (
-              <img
-                src={user.photoURL}
-                alt="Profile"
-                className="w-12 h-12 rounded-full border-2 border-[#2ECC71]"
-              />
-            )}
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-[#2ECC71]/10">
-              <User className="w-6 h-6 text-[#2ECC71]" />
-              <div className="flex flex-col">
-                <span className="text-[#EAECEE] font-medium">
-                  {user.displayName || 'User'}
-                </span>
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-3 w-full p-3 rounded-lg hover:bg-[#2ECC71]/10 text-[#EAECEE] transition-colors"
-          >
-            <LogOut className="w-6 h-6 text-[#2ECC71]" />
-            <span>Logout</span>
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <Link
-            to="/login"
-            className="block w-full p-3 text-center rounded-lg bg-[#2ECC71] text-[#1C1C1C] font-semibold hover:bg-[#01FF70] transition-colors"
-          >
-            Login
-          </Link>
-          <Link
-            to="/register"
-            className="block w-full p-3 text-center rounded-lg border border-[#2ECC71] text-[#2ECC71] font-semibold hover:bg-[#2ECC71]/10 transition-colors"
-          >
-            Register
-          </Link>
-        </div>
-      )}
-    </div>
-  </div>
-);
-
-
-
-const GameCard = ({ game }) => (
-  <Link to={`/game/${game.id}`} className="block h-full">
-    <div className="relative group overflow-hidden rounded-lg border border-[#2ECC71]/20 bg-[#1C1C1C]">
-      <div
-        className="aspect-video w-full bg-cover bg-center transform transition-transform duration-300 group-hover:scale-110"
-        style={{ backgroundImage: `url(${game.image || '/default-game-image.jpg'})` }}
-      />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#1C1C1C] via-[#1C1C1C]/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-        <div className="absolute bottom-0 p-4 w-full">
-          <h3 className="text-lg font-bold text-[#EAECEE] mb-2">{game.name}</h3>
-          <div className="flex items-center gap-2 text-sm text-[#EAECEE]/80">
-            <Star className="w-4 h-4 text-[#2ECC71]" />
-            <span>{game.rating?.toFixed(1)}</span>
-            {game.releaseDate && (
-              <>
-                <span className="mx-2 text-[#2ECC71]">•</span>
-                <Calendar className="w-4 h-4 text-[#2ECC71]" />
-                <span>{new Date(game.releaseDate).getFullYear()}</span>
-              </>
-            )}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {game.genres?.slice(0, 3).map(genre => (
-              <span key={genre.id} className="text-xs bg-[#2ECC71]/10 text-[#2ECC71] rounded-full px-2 py-1 border border-[#2ECC71]/20">
-                {genre.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  </Link>
-);
-
-const GameSection = ({ title, games, loading }) => (
-  <div className="mb-12">
-    <div className="flex justify-between items-center mb-6">
-      <h2 className="text-2xl font-bold text-[#EAECEE] border-l-4 border-[#2ECC71] pl-4">{title}</h2>
-      <button className="text-[#2ECC71] hover:text-[#01FF70] flex items-center gap-1 transition-colors">
-        View All <ChevronRight className="w-4 h-4" />
-      </button>
-    </div>
-    {loading ? (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="animate-pulse">
-            <div className="aspect-video bg-[#3D9970]/20 rounded-lg mb-2" />
-            <div className="h-4 bg-[#3D9970]/20 rounded w-3/4" />
-          </div>
-        ))}
-      </div>
-    ) : (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {games?.map(game => (
-          <GameCard key={game.id} game={game} />
-        ))}
-      </div>
-    )}
-  </div>
-);
 
 const GameList = () => {
   const navigate = useNavigate();
@@ -279,43 +157,12 @@ const GameList = () => {
       </button>
       <Sidebar user={user} onLogout={handleLogout} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex-1 min-h-screen bg-[#1C1C1C] text-[#EAECEE]">
-        <div className="relative h-[70vh] mb-12">
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{
-              backgroundImage: `url(${topGames[0]?.image})`,
-              backgroundAttachment: 'fixed'
-            }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-t from-[#1C1C1C] via-[#1C1C1C]/80" />
-          </div>
-          <div className="relative h-full container mx-auto px-6 flex flex-col justify-center">
-            <h1 className="text-5xl font-bold text-[#EAECEE] mb-6">
-              Discover Your Next
-              <span className="text-[#2ECC71] ml-2 relative">
-                Gaming Adventure
-                <span className="absolute -inset-1 animate-pulse bg-[#2ECC71]/20 blur-lg"></span>
-              </span>
-            </h1>
-            <form onSubmit={handleSearch} className="max-w-2xl">
-              <div className="relative">
-                <input
-                  type="text"
-                  className="w-full bg-[#1C1C1C]/80 text-[#EAECEE] placeholder-[#EAECEE]/30 border border-[#2ECC71]/20 backdrop-blur-lg px-6 py-4 rounded-full focus:outline-none focus:border-[#2ECC71] focus:ring-1 focus:ring-[#2ECC71]/50 transition-all"
-                  placeholder="Search for games..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-[#2ECC71] p-3 rounded-full hover:bg-[#01FF70] transition-colors group"
-                >
-                  <Search className="w-5 h-5 text-[#1C1C1C]" />
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <HeroSection
+          topGameImage={topGames[0]?.image}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          handleSearch={handleSearch}
+        />
 
         <div className="container mx-auto px-6 pb-12">
           {searchQuery && searchResults.length > 0 && (
@@ -327,7 +174,6 @@ const GameList = () => {
           <GameSection title="Upcoming Games" games={upcoming} loading={loading} />
           <GameSection title="Action Games" games={actionGames} loading={loading} />
           <GameSection title="Recommended For You" games={recommendedGames} loading={loading} />
-
         </div>
       </div>
     </div>
