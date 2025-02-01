@@ -4,15 +4,13 @@ import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  // Your Firebase config object
-  // Get this from Firebase Console after creating a project
-  apiKey: "AIzaSyDXFJmnfDrL7JDIbCkD-CFLJaBTo09yTR0",
-  authDomain: "bigdawgs0212.firebaseapp.com",
-  projectId: "bigdawgs0212",
-  storageBucket: "bigdawgs0212.firebasestorage.app",
-  messagingSenderId: "325696385660",
-  appId: "1:325696385660:web:4367d2cff35350195a4ff9",
-  measurementId: "G-4XSN0MTNC6"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
