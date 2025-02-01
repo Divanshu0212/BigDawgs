@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-const RAWG_API_KEY = import.meta.env.RAWG_API_KEY;
-;
+const RAWG_API_KEY = import.meta.env.VITE_RAWG_API_KEY;
 const BASE_URL = 'https://api.rawg.io/api';
 
 export const fetchGameDetails = async (gameId) => {

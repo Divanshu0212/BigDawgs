@@ -234,7 +234,7 @@ const GameList = () => {
       const userId = auth.currentUser?.uid;
       if (!userId) return;
 
-      const response = await fetch("http://127.0.0.1:5000/recommend", {
+      const response = await fetch("https://game-recommender-api.onrender.com/recommend", {
         method: "POST",  // <-- Change to POST
         headers: {
           "Content-Type": "application/json"
