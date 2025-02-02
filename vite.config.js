@@ -9,11 +9,6 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
-  server: {
-    proxy: {
-      '/api/steam': require('./proxy.js'),
-    },
-  },
   build: {
     rollupOptions: {
       // ... other options
