@@ -1,26 +1,24 @@
 {
-    "rewrites": [
+    "routes": [
         {
-            "source": "/login",
-            "destination": "/index.html"
+            "src": "/",
+            "dest": "/"
         },
         {
-            "source": "/signup",
-            "destination": "/index.html"
+            "src": "/login",
+            "dest": "/"
         },
         {
-            "source": "/home",
-            "destination": "/index.html"
+            "src": "/signup",
+            "dest": "/"
         },
         {
-            "source": "/game/:id",
-            "destination": "/index.html"
+            "src": "/home",
+            "dest": "/"
         },
         {
-            "source": "/(.*)",
-            "destination": "/index.html"
+            "src": "/game/:id",
+            "dest": "/"
         }
-    ],
-    "cleanUrls": true,
-    "trailingSlash": false
+    ]
 }
