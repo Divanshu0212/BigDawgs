@@ -134,7 +134,7 @@ const GameList = () => {
 
   if (error) {
     return (
-      <div className="flex">
+      <div className="flex w-full">
         <Sidebar user={user} onLogout={handleLogout} />
         <div className="ml-64 min-h-screen bg-[#1C1C1C] text-[#EAECEE] flex items-center justify-center">
           <div className="text-center">

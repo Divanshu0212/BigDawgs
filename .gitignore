@@ -1,14 +1,4 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-*.egg-info/
-pip-log.txt
-pip-delete-this-directory.txt
+
 
 # Jupyter Notebook
 .ipynb_checkpoints/
@@ -46,11 +36,7 @@ Thumbs.db
 firebase-debug.log
 .firebaserc
 
-# Machine Learning Models
-*.h5
-*.pkl
-*.joblib
-model/
+
 
 # Temporary files
 *.tmp
