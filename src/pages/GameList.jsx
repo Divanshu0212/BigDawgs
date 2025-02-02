@@ -13,7 +13,7 @@ import { Star, Calendar, ChevronRight, Search, User, LogOut, MoreVertical, X } f
 import { Link } from 'react-router-dom';
 import { db } from '../firebase/firebase'; // Your Firebase config
 import { doc, setDoc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
-import Sidebar from '../Components/Sidebar';
+const Sidebar =React.lazy(()=>import( '../Components/Sidebar'));
 import GameSection from '../Components/GameSection';
 import HeroSection from '../Components/HeroSection';
 

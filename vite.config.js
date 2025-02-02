@@ -23,4 +23,18 @@ export default defineConfig({
       // Add any other MUI-related packages you are using here.
     ],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Split node_modules into a separate chunk
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        }
+      }
+    },
+    // Or increase the warning limit if needed
+    chunkSizeWarningLimit: 1000
+  }
 });

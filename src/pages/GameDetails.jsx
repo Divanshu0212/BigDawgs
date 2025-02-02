@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { fetchGameDetails } from './GameService';
 import { Star, Calendar, Globe, Clock, Trophy, ChevronLeft } from 'lucide-react';
-import GameDiscussion from '../Components/GameDiscussion';
+const GameDiscussion =React.lazy(()=>import( '../Components/GameDiscussion'))
 
 const GameDetails = () => {
   const { id } = useParams();
