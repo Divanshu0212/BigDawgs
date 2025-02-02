@@ -1,0 +1,26 @@
+{
+    "rewrites": [
+        {
+            "source": "/login",
+            "destination": "/index.html"
+        },
+        {
+            "source": "/signup",
+            "destination": "/index.html"
+        },
+        {
+            "source": "/home",
+            "destination": "/index.html"
+        },
+        {
+            "source": "/game/:id",
+            "destination": "/index.html"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
+}
