@@ -31,7 +31,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Load game dataset (Ensure you have a CSV with game details)
-games_df = pd.read_csv("model\games_dataset.csv")
+games_df = pd.read_csv("./games_dataset.csv")
 
 # Preprocess game descriptions using TF-IDF
 vectorizer = TfidfVectorizer(stop_words="english")
