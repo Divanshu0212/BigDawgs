@@ -1,9 +1,32 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Star, Calendar } from 'lucide-react';
+import { auth, db } from '../firebase/firebase';
+import { doc, getDoc, updateDoc, setDoc, arrayUnion } from 'firebase/firestore';
+
+const handleGameClick = async (gameName) => {
+  try {
+    const userId = auth.currentUser.uid;
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    if (userDoc.exists()) {
+      await updateDoc(userRef, {
+        clickHistory: arrayUnion(gameName.toLowerCase()),
+      });
+    } else {
+      await setDoc(userRef, { clickHistory: [gameName.toLowerCase()] });
+    }
+
+    // Optional: Navigate to game details or perform other actions
+    // navigate(`/game/${gameName}`);
+  } catch (err) {
+    console.error('Failed to log game click', err);
+  }
+};
 
 const GameCard = ({ game }) => (
-  <Link to={`/game/${game.id}`} className="block h-full">
+  <Link onClick={()=>handleGameClick(game.name)} to={`/game/${game.id}`} className="block h-full">
     <div className="relative group overflow-hidden rounded-lg border border-[#2ECC71]/20 bg-[#1C1C1C]">
       <GameImage image={game.image} />
       <GameOverlay game={game} />

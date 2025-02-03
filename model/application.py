@@ -31,7 +31,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Load game dataset (Ensure you have a CSV with game details)
-games_df = pd.read_csv("./games_dataset.csv")  
+games_df = pd.read_csv("model\games_dataset.csv")
 
 # Preprocess game descriptions using TF-IDF
 vectorizer = TfidfVectorizer(stop_words="english")
@@ -86,14 +86,13 @@ def recommend_games(user_search_history):
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
-    """Fetch user search history from Firebase, find similar games, and recommend from RAWG."""
     data = request.json
     user_id = data.get("user_id")
 
     if not user_id:
         return jsonify({"error": "User ID is required"}), 400
 
-    # Fetch user search history from Firebase
+    # Fetch user search and click history from Firebase
     user_ref = db.collection("users").document(user_id)
     user_doc = user_ref.get()
 
@@ -102,12 +101,15 @@ def recommend():
 
     user_data = user_doc.to_dict()
     user_search_history = user_data.get("searchHistory", [])
+    user_click_history = user_data.get("clickHistory", [])
 
-    if not user_search_history:
-        return jsonify({"error": "No search history found"}), 404
+    # Combine search and click history
+    combined_history = list(set(user_search_history + user_click_history))
 
-    recommendations = recommend_games(user_search_history)
-    print(recommendations)
+    if not combined_history:
+        return jsonify({"error": "No search or click history found"}), 404
+
+    recommendations = recommend_games(combined_history)
     return jsonify(recommendations)
 
 if __name__ == "__main__":
