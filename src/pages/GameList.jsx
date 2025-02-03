@@ -13,7 +13,7 @@ import { Star, Calendar, ChevronRight, Search, User, LogOut, MoreVertical, X } f
 import { Link } from 'react-router-dom';
 import { db } from '../firebase/firebase'; // Your Firebase config
 import { doc, setDoc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
-const Sidebar =React.lazy(()=>import( '../Components/Sidebar'));
+const Sidebar = React.lazy(() => import('../Components/Sidebar'));
 import GameSection from '../Components/GameSection';
 import HeroSection from '../Components/HeroSection';
 
@@ -173,7 +173,13 @@ const GameList = () => {
           <GameSection title="New Releases" games={newReleases} loading={loading} />
           <GameSection title="Upcoming Games" games={upcoming} loading={loading} />
           <GameSection title="Action Games" games={actionGames} loading={loading} />
-          <GameSection title="Recommended For You" games={recommendedGames} loading={loading} />
+          {recommendedGames.length > 0 && (
+            <GameSection
+              title="Recommended For You"
+              games={recommendedGames}
+              loading={loading}
+            />
+          )}
         </div>
       </div>
     </div>
