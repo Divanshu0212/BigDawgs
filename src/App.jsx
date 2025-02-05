@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import GameList from './pages/GameList'
 import GameDetails from './pages/GameDetails';
+import ChatRoom from './pages/ChatRoom';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="/signup" element={<SignUp />} />
         <Route path="/home" element={<GameList />} />
         <Route path="/game/:id" element={<GameDetails />} />
+        <Route path="/chat/:roomId" element={<ChatRoom/>} />
       </Routes>
     </Router>
   );
