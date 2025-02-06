@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AgoraRTC from 'agora-rtc-sdk-ng';
 import {
   collection, addDoc, query, where,
   orderBy, onSnapshot, serverTimestamp,
@@ -42,14 +43,112 @@ const ChatRoom = () => {
   // Voice communication states
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [localStream, setLocalStream] = useState(null);
-  const [peerConnections, setPeerConnections] = useState(new Map());
-  const [activeUsers, setActiveUsers] = useState(new Set());
-  const audioElements = useRef(new Map());
+  const peerRef = useRef(null);
+  const audioRef = useRef(null);
+
+  const [client, setClient] = useState(null);
+  const [localAudioTrack, setLocalAudioTrack] = useState(null);
+  const [roomChannelId, setRoomChannelId] = useState(null);
+
+  // Agora configuration
+  const AGORA_APP_ID = 'df4c4a3ec8344b2b8f03e5413af88838'; // Replace with your actual Agora App ID
+  const AGORA_PRIMARY_CERTIFICATE = '8639cd1f99d5415dbeb7f34896abdc7b'; // Replace with your primary certificate
+
+
+  const initAgoraClient = async () => {
+    try {
+      // Create Agora client with correct configuration
+      const agoraClient = AgoraRTC.createClient({
+        mode: 'rtc',
+        codec: 'vp8'
+      });
+
+      // Generate a temporary token or use null for testing
+      const token = null; // Replace with actual token generation
+
+      // Join the channel directly
+      await agoraClient.join(
+        AGORA_APP_ID,
+        roomId,
+        token,
+        auth.currentUser.uid
+      );
+
+      // Create and publish local audio track
+      const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      await agoraClient.publish([audioTrack]);
+
+      // Set up event listeners
+      agoraClient.on('user-published', async (user, mediaType) => {
+        if (mediaType === 'audio') {
+          const remoteAudioTrack = await user.audioTrack;
+          remoteAudioTrack.play();
+        }
+      });
+
+      setClient(agoraClient);
+      setLocalAudioTrack(audioTrack);
+      setIsAudioEnabled(true);
+    } catch (error) {
+      console.error('Agora initialization error:', error);
+      setIsAudioEnabled(false);
+    }
+  };
+
+  // Generate Agora token (you'll need to implement this server-side)
+  const generateAgoraToken = async (channelName, uid) => {
+    try {
+      // This should be a server-side endpoint that generates a token
+      const response = await fetch('/api/generate-agora-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channelName,
+          uid,
+          role: 'publisher'
+        })
+      });
+
+      const { token } = await response.json();
+      return token;
+    } catch (error) {
+      console.error('Token generation error:', error);
+      throw error;
+    }
+  };
+
+  // Toggle audio
+  const toggleAudio = async () => {
+    if (isAudioEnabled) {
+      // Stop and close audio track
+      localAudioTrack?.close();
+      
+      // Leave Agora channel
+      await client?.leave();
+
+      setIsAudioEnabled(false);
+      setLocalAudioTrack(null);
+      setClient(null);
+    } else {
+      await initAgoraClient();
+    }
+  };
+
+
+  // Cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      localAudioTrack?.close();
+      client?.leave();
+    };
+  }, [localAudioTrack, client]);
+
 
   // Authentication state tracking
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("Auth state changed:", user); // Debug log
       setCurrentUser(user);
     });
     return () => unsubscribe();
@@ -58,244 +157,67 @@ const ChatRoom = () => {
   // Cleanup listener
   useEffect(() => {
     return () => {
+      if (unsubscribeFn) unsubscribeFn();
       localStream?.getTracks().forEach(track => track.stop());
-      peerConnections.forEach(pc => pc.close());
-      setPeerConnections(new Map());
-      audioElements.current.forEach(audio => {
-        audio.pause();
-        audio.srcObject = null;
-      });
-      audioElements.current.clear();
+      // Additional cleanup for WebRTC can be added here if needed
     };
-  }, [localStream, peerConnections]);
+  }, [unsubscribeFn, localStream]);
 
-  // Track active users
+  // Room and messages initialization
   useEffect(() => {
-    if (!roomId || !currentUser) return;
+    setMessages([]);
+    setRoomDetails(null);
+    setRoomError(null);
 
-    const activeUsersRef = collection(db, 'voiceCommunications', roomId, 'activeUsers');
+    if (!currentUser || !roomId) return;
 
-    // Add current user to active users
-    const addActiveUser = async () => {
-      await setDoc(doc(activeUsersRef, currentUser.uid), {
-        userId: currentUser.uid,
-        displayName: currentUser.displayName || 'Anonymous',
-        timestamp: serverTimestamp()
-      });
-    };
+    const checkRoomValidity = async () => {
+      const roomsRef = collection(db, 'chatRooms');
+      const q = query(roomsRef, where('id', '==', roomId));
 
-    addActiveUser();
+      try {
+        const querySnapshot = await getDocs(q);
 
-    // Listen for active users changes
-    const unsubscribe = onSnapshot(activeUsersRef, (snapshot) => {
-      const users = new Set();
-      snapshot.docs.forEach(doc => {
-        users.add(doc.id);
-      });
-      setActiveUsers(users);
-      console.log('Active users:', Array.from(users)); // Debug log
-    });
-
-    // Cleanup: Remove user from active users
-    return () => {
-      unsubscribe();
-      if (currentUser) {
-        deleteDoc(doc(activeUsersRef, currentUser.uid));
-      }
-    };
-  }, [roomId, currentUser]);
-
-  // Handle offers, answers, and ICE candidates
-  useEffect(() => {
-    if (!roomId || !currentUser || !isAudioEnabled) return;
-
-    const offersRef = collection(db, 'voiceCommunications', roomId, 'offers');
-    const answersRef = collection(db, 'voiceCommunications', roomId, 'answers');
-    const candidatesRef = collection(db, 'voiceCommunications', roomId, 'candidates');
-
-    // Handle offers
-    const unsubscribeOffers = onSnapshot(
-      query(offersRef, where('toUserId', '==', currentUser.uid)),
-      async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            const fromUserId = data.fromUserId;
-
-            let pc = peerConnections.get(fromUserId);
-            if (!pc) {
-              pc = createPeerConnection(fromUserId);
-              setPeerConnections(prev => new Map(prev).set(fromUserId, pc));
-            }
-
-            try {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-
-              await addDoc(answersRef, {
-                answer: answer,
-                fromUserId: currentUser.uid,
-                toUserId: fromUserId,
-                timestamp: serverTimestamp()
-              });
-            } catch (err) {
-              console.error('Error handling offer:', err);
-            }
-          }
+        if (querySnapshot.empty) {
+          setRoomError('Room does not exist');
+          setTimeout(() => navigate('/home'), 3000);
+          return;
         }
-      }
-    );
 
-    // Handle answers
-    const unsubscribeAnswers = onSnapshot(
-      query(answersRef, where('toUserId', '==', currentUser.uid)),
-      async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            const pc = peerConnections.get(data.fromUserId);
-            if (pc && pc.signalingState === 'have-local-offer') {
-              try {
-                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-              } catch (err) {
-                console.error('Error handling answer:', err);
-              }
-            } else {
-              console.warn('PeerConnection not in correct state to set remote answer:', pc?.signalingState);
-            }
-          }
+        const roomDoc = querySnapshot.docs[0];
+        const roomData = roomDoc.data();
+
+        if (roomData.expiresAt.toDate() < new Date()) {
+          await deleteDoc(roomDoc.ref);
+          setRoomError('Room has expired');
+          setTimeout(() => navigate('/home'), 3000);
+          return;
         }
-      }
-    );
 
-    // Handle ICE candidates
-    const unsubscribeCandidates = onSnapshot(
-      query(candidatesRef, where('toUserId', '==', currentUser.uid)),
-      async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            const pc = peerConnections.get(data.fromUserId);
-            if (pc) {
-              try {
-                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-              } catch (err) {
-                console.error('Error adding ICE candidate:', err);
-              }
-            }
-          }
-        }
-      }
-    );
+        setRoomDetails(roomData);
 
-    return () => {
-      unsubscribeOffers();
-      unsubscribeAnswers();
-      unsubscribeCandidates();
-    };
-  }, [roomId, isAudioEnabled, peerConnections]);
-  // At the start of your component
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("Auth state changed:", user);  // Debug log
-      setCurrentUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
+        const messagesRef = collection(db, 'chatRooms', roomId, 'messages');
+        const messagesQuery = query(messagesRef, orderBy('createdAt'));
 
-  // Create a peer connection
-  const createPeerConnection = (remoteUserId) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
-    });
-
-    // Add local stream tracks
-    if (localStream) {
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-
-    // Handle ICE candidates
-    pc.onicecandidate = async (event) => {
-      if (event.candidate && pc.remoteDescription) {
-        await addDoc(collection(db, 'voiceCommunications', roomId, 'candidates'), {
-          candidate: event.candidate.toJSON(),
-          fromUserId: currentUser.uid,
-          toUserId: remoteUserId,
-          timestamp: serverTimestamp()
+        const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+          const fetchedMessages = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setMessages(fetchedMessages);
         });
+
+        setUnsubscribeFn(() => unsubscribe);
+        scrollToBottom();
+      } catch (error) {
+        console.error('Room validity check error:', error);
+        setRoomError('An error occurred');
+        setTimeout(() => navigate('/home'), 3000);
       }
     };
 
-    // Handle incoming tracks
-    pc.ontrack = (event) => {
-      const audioElement = new Audio();
-      audioElement.srcObject = event.streams[0];
-      audioElement.autoplay = true;
-      audioElements.current.set(remoteUserId, audioElement);
-      console.log('Remote stream received:', event.streams[0]); // Debug log
-    };
-
-    // Log connection state changes
-    pc.onconnectionstatechange = () => {
-      console.log(`Connection state: ${pc.connectionState}`);
-    };
-
-    return pc;
-  };
-
-  // Initialize voice chat
-  const initVoiceChat = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setLocalStream(stream);
-
-      // Create peer connections for all active users
-      activeUsers.forEach(async (userId) => {
-        if (userId !== currentUser.uid) {
-          const pc = createPeerConnection(userId);
-          setPeerConnections(prev => new Map(prev).set(userId, pc));
-
-          // Create and send offer
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer); // Set local description before sending the offer
-          await addDoc(collection(db, 'voiceCommunications', roomId, 'offers'), {
-            offer: offer,
-            fromUserId: currentUser.uid,
-            toUserId: userId,
-            timestamp: serverTimestamp()
-          });
-        }
-      });
-
-      setIsAudioEnabled(true);
-    } catch (error) {
-      console.error("Voice chat error:", error);
-      setIsAudioEnabled(false);
-    }
-  };
-
-  // Toggle voice communication
-  const toggleAudio = () => {
-    if (isAudioEnabled) {
-      localStream?.getTracks().forEach(track => track.stop());
-      peerConnections.forEach(pc => pc.close());
-      setPeerConnections(new Map());
-      audioElements.current.forEach(audio => {
-        audio.pause();
-        audio.srcObject = null;
-      });
-      audioElements.current.clear();
-      setIsAudioEnabled(false);
-      setLocalStream(null);
-    } else {
-      initVoiceChat();
-    }
-  };
+    checkRoomValidity();
+  }, [roomId, navigate, currentUser]);
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -305,7 +227,7 @@ const ChatRoom = () => {
   // Send message
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentUser) return;
+    if (!newMessage.trim() || !auth.currentUser) return;
 
     const messagesRef = collection(db, 'chatRooms', roomId, 'messages');
 
@@ -313,9 +235,9 @@ const ChatRoom = () => {
       text: newMessage,
       createdAt: serverTimestamp(),
       user: {
-        id: currentUser.uid,
-        name: currentUser.displayName || 'Anonymous',
-        avatar: currentUser.photoURL,
+        id: auth.currentUser.uid,
+        name: auth.currentUser.displayName || 'Anonymous',
+        avatar: auth.currentUser.photoURL,
       },
     });
 
@@ -343,7 +265,7 @@ const ChatRoom = () => {
     );
   }
 
-  if (!currentUser) {
+  if (!auth.currentUser) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-[#1C1C1C] text-[#EAECEE] p-4 text-center">
         <h2 className="text-2xl font-bold text-[#2ECC71] mb-4">
@@ -359,13 +281,12 @@ const ChatRoom = () => {
     );
   }
 
+  if (!roomDetails) return <div className="bg-[#1C1C1C] h-screen flex items-center justify-center text-[#2ECC71]">Loading...</div>;
 
   return (
     <div className="flex flex-col h-screen bg-[#1C1C1C] text-[#EAECEE]">
       <div className="flex justify-between items-center p-4 bg-[#2ECC71]/10 border-b border-[#2ECC71]/20">
-        <h2 className="text-xl font-bold text-[#2ECC71]">
-          Chat Room: {roomId} ({activeUsers.size} users in chat)
-        </h2>
+        <h2 className="text-xl font-bold text-[#2ECC71]">Chat Room: {roomId}</h2>
         <div className="flex items-center space-x-4">
           <button
             onClick={copyRoomLink}
@@ -394,11 +315,13 @@ const ChatRoom = () => {
           <MessageBubble
             key={message.id}
             message={message}
-            isOwnMessage={message.user.id === currentUser?.uid}
+            isOwnMessage={message.user.id === auth.currentUser?.uid}
           />
         ))}
         <div ref={messagesEndRef} />
       </div>
+
+      <audio ref={audioRef} style={{ display: 'none' }} />
 
       <form onSubmit={sendMessage} className="p-4 bg-[#2ECC71]/10">
         <div className="flex items-center space-x-4">
