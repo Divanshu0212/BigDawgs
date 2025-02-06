@@ -4,15 +4,32 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import requests  # For RAWG API calls
-from flask_cors import CORS  # Import CORS
+import requests
+from flask_cors import CORS
 import os
 from dotenv import load_dotenv
+from functools import lru_cache
+from typing import List, Dict, Optional
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Initialize Firebase
-cred = credentials.Certificate({
+class GameRecommender:
+    def __init__(self):
+        self.initialize_firebase()
+        self.initialize_flask()
+        self.load_game_data()
+        self.executor = ThreadPoolExecutor(max_workers=3)  # For parallel API calls
+        
+    def initialize_firebase(self):
+        """Initialize Firebase connection with error handling."""
+        try:
+            cred = credentials.Certificate({
     "type": "service_account",
     "project_id": os.getenv('FIREBASE_PROJECT_ID'),
     "private_key_id": os.getenv('FIREBASE_PRIVATE_KEY_ID'),
@@ -24,93 +41,119 @@ cred = credentials.Certificate({
     "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
     "client_x509_cert_url": os.getenv('FIREBASE_CLIENT_CERT_URL')
 })
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+            firebase_admin.initialize_app(cred)
+            self.db = firestore.client()
+        except Exception as e:
+            logger.error(f"Firebase initialization failed: {e}")
+            raise
 
-app = Flask(__name__)
-CORS(app)
+    def initialize_flask(self):
+        """Initialize Flask application with CORS."""
+        self.app = Flask(__name__)
+        CORS(self.app)
+        self.setup_routes()
 
-# Load game dataset (Ensure you have a CSV with game details)
-games_df = pd.read_csv("./games_dataset.csv")
+    def load_game_data(self):
+        """Load and preprocess game dataset with error handling."""
+        try:
+            self.games_df = pd.read_csv("./games_dataset.csv")
+            self.vectorizer = TfidfVectorizer(stop_words="english")
+            self.game_vectors = self.vectorizer.fit_transform(self.games_df["description"])
+        except Exception as e:
+            logger.error(f"Failed to load game data: {e}")
+            raise
 
-# Preprocess game descriptions using TF-IDF
-vectorizer = TfidfVectorizer(stop_words="english")
-game_vectors = vectorizer.fit_transform(games_df["description"])
+    def setup_routes(self):
+        """Set up Flask routes."""
+        self.app.route("/recommend", methods=["POST"])(self.recommend_endpoint)
 
-# RAWG API Key (Replace with your own)
-RAWG_API_KEY = os.getenv('RAWG_API_KEY')
-RAWG_API_URL = "https://api.rawg.io/api/games"
-
-def fetch_similar_game_from_rawg(game_name):
-    """Search for a game on RAWG and return the first match."""
-    params = {"key": RAWG_API_KEY, "search": game_name, "page_size": 1}
-    response = requests.get(RAWG_API_URL, params=params)
-
-    if response.status_code == 200:
-        results = response.json().get("results", [])
-        if results:
-            return {
-                "name": results[0]["name"],
-                "image": results[0].get("background_image", ""),
-                "rating": results[0].get("rating", 0),
-                "genres": [genre["name"] for genre in results[0].get("genres", [])]
+    @lru_cache(maxsize=100)
+    def fetch_similar_game_from_rawg(self, game_name: str) -> Optional[Dict]:
+        """Cached function to fetch game data from RAWG API."""
+        try:
+            params = {
+                "key": os.getenv('VITE_RAWG_API_KEY'),
+                "search": game_name,
+                "page_size": 1
             }
-    return None  # No match found
+            response = requests.get(
+                "https://api.rawg.io/api/games",
+                params=params,
+                timeout=5  # Add timeout
+            )
+            response.raise_for_status()
+            
+            results = response.json().get("results", [])
+            if results:
+                return {
+                    "name": results[0]["name"],
+                    "image": results[0].get("background_image", ""),
+                    "rating": results[0].get("rating", 0),
+                    "genres": [genre["name"] for genre in results[0].get("genres", [])]
+                }
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"RAWG API request failed for {game_name}: {e}")
+            return None
 
-def recommend_games(user_search_history):
-    """Find similar games from the dataset and fetch additional similar games from RAWG."""
-    if not user_search_history:
-        return []
+    def get_user_history(self, user_id: str) -> Optional[List[str]]:
+        """Fetch and combine user search and click history."""
+        try:
+            user_doc = self.db.collection("users").document(user_id).get()
+            if not user_doc.exists:
+                return None
+                
+            user_data = user_doc.to_dict()
+            search_history = set(user_data.get("searchHistory", []))
+            click_history = set(user_data.get("clickHistory", []))
+            return list(search_history | click_history)  # Union of both sets
+        except Exception as e:
+            logger.error(f"Failed to fetch user history: {e}")
+            return None
 
-    # Convert search history into a query vector
-    user_query = " ".join(user_search_history)
-    user_vector = vectorizer.transform([user_query])
+    def recommend_games(self, user_history: List[str]) -> List[Dict]:
+        """Generate game recommendations using parallel processing."""
+        if not user_history:
+            return []
 
-    # Compute similarity scores
-    similarities = cosine_similarity(user_vector, game_vectors).flatten()
-    
-    # Get top 10 recommended game indices
-    recommended_indices = similarities.argsort()[-10:][::-1]
-    
-    # Get the recommended games
-    recommended_games = games_df.iloc[recommended_indices][["name", "genre"]].to_dict(orient="records")
+        # Convert search history into a query vector
+        user_vector = self.vectorizer.transform([" ".join(user_history)])
+        similarities = cosine_similarity(user_vector, self.game_vectors).flatten()
+        
+        # Get top 10 recommended games
+        recommended_indices = similarities.argsort()[-10:][::-1]
+        recommended_games = self.games_df.iloc[recommended_indices][["name", "genre"]].to_dict(orient="records")
 
-    # Fetch similar games from RAWG
-    rawg_recommendations = []
-    for game in recommended_games:
-        rawg_game = fetch_similar_game_from_rawg(game["name"])
-        if rawg_game:
-            rawg_recommendations.append(rawg_game)
+        # Fetch RAWG data in parallel
+        futures = [
+            self.executor.submit(self.fetch_similar_game_from_rawg, game["name"])
+            for game in recommended_games
+        ]
+        
+        # Collect results, filtering out None values
+        return [result.result() for result in futures if result.result() is not None]
 
-    return rawg_recommendations
+    def recommend_endpoint(self):
+        """Handle recommendation requests."""
+        try:
+            user_id = request.json.get("user_id")
+            if not user_id:
+                return jsonify({"error": "User ID is required"}), 400
 
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    data = request.json
-    user_id = data.get("user_id")
+            user_history = self.get_user_history(user_id)
+            if not user_history:
+                return jsonify({"error": "No user history found"}), 404
 
-    if not user_id:
-        return jsonify({"error": "User ID is required"}), 400
+            recommendations = self.recommend_games(user_history)
+            return jsonify(recommendations)
+        except Exception as e:
+            logger.error(f"Recommendation endpoint error: {e}")
+            return jsonify({"error": "Internal server error"}), 500
 
-    # Fetch user search and click history from Firebase
-    user_ref = db.collection("users").document(user_id)
-    user_doc = user_ref.get()
-
-    if not user_doc.exists:
-        return jsonify({"error": "User not found"}), 404
-
-    user_data = user_doc.to_dict()
-    user_search_history = user_data.get("searchHistory", [])
-    user_click_history = user_data.get("clickHistory", [])
-
-    # Combine search and click history
-    combined_history = list(set(user_search_history + user_click_history))
-
-    if not combined_history:
-        return jsonify({"error": "No search or click history found"}), 404
-
-    recommendations = recommend_games(combined_history)
-    return jsonify(recommendations)
+    def run(self, debug=False):
+        """Run the Flask application."""
+        self.app.run(debug=debug)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    recommender = GameRecommender()
+    recommender.run(debug=True)

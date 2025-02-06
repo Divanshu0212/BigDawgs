@@ -2,14 +2,31 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, query, where,
   orderBy, onSnapshot, serverTimestamp,
-  deleteDoc, getDocs
+  deleteDoc, getDocs, setDoc, doc
 } from 'firebase/firestore';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { db, auth } from '../firebase/firebase';
 import { Send, Copy, Mic, MicOff } from 'lucide-react';
 import { onAuthStateChanged } from 'firebase/auth';
-import Peer from 'simple-peer/simplepeer.min.js';
-import io from 'socket.io-client';
+
+// Message Bubble Component
+const MessageBubble = ({ message, isOwnMessage }) => (
+  <div className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+    <div className={`
+      max-w-[70%] p-3 rounded-lg
+      ${isOwnMessage
+        ? 'bg-[#2ECC71]/30 text-[#EAECEE]'
+        : 'bg-[#2ECC71]/10 text-[#EAECEE]'}
+    `}>
+      {!isOwnMessage && (
+        <div className="text-sm text-[#2ECC71] mb-1">
+          {message.user.name}
+        </div>
+      )}
+      <div>{message.text}</div>
+    </div>
+  </div>
+);
 
 const ChatRoom = () => {
   const { roomId } = useParams();
@@ -25,9 +42,8 @@ const ChatRoom = () => {
   // Voice communication states
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [localStream, setLocalStream] = useState(null);
-  const [peers, setPeers] = useState([]);
-  const peersRef = useRef([]);
-  const socketRef = useRef(null);
+  const peerRef = useRef(null);
+  const audioRef = useRef(null);
 
   // Authentication state tracking
   useEffect(() => {
@@ -41,8 +57,10 @@ const ChatRoom = () => {
   useEffect(() => {
     return () => {
       if (unsubscribeFn) unsubscribeFn();
+      localStream?.getTracks().forEach(track => track.stop());
+      // Additional cleanup for WebRTC can be added here if needed
     };
-  }, [unsubscribeFn]);
+  }, [unsubscribeFn, localStream]);
 
   // Room and messages initialization
   useEffect(() => {
@@ -102,72 +120,99 @@ const ChatRoom = () => {
 
   // Voice communication initialization
   const initVoiceChat = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setLocalStream(stream);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setLocalStream(stream);
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
 
-      socketRef.current = io('https://your-signaling-server.com');
-      socketRef.current.emit('join room', roomId);
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    pc.ontrack = (event) => {
+      if (audioRef.current) {
+        audioRef.current.srcObject = event.streams[0];
+      }
+    };
 
-      socketRef.current.on('all users', users => {
-        const newPeers = users.map(userID => {
-          const peer = createPeer(userID, socketRef.current.id, stream);
-          return peer;
-        });
-        setPeers(newPeers);
+    const offersRef = collection(db, 'voiceCommunications', roomId, 'offers');
+    const answersRef = collection(db, 'voiceCommunications', roomId, 'answers');
+
+    const unsubscribeOffers = onSnapshot(
+      query(offersRef, where('userId', '!=', auth.currentUser.uid)),
+      async (snapshot) => {
+        for (const change of snapshot.docChanges()) {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            try {
+              if (!data.offer || !data.offer.sdp) {
+                console.error('Invalid remote description data:', data);
+                continue;
+              }
+
+              const remoteDesc = new RTCSessionDescription({
+                type: 'offer',
+                sdp: data.offer.sdp
+              });
+
+              if (pc.signalingState !== 'closed') {
+                await pc.setRemoteDescription(remoteDesc);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await addDoc(answersRef, {
+                  answer: {
+                    type: 'answer',
+                    sdp: answer.sdp
+                  },
+                  userId: auth.currentUser.uid,
+                  timestamp: serverTimestamp()
+                });
+              }
+            } catch (err) {
+              console.error('Error processing remote description:', err);
+            }
+          }
+        }
+      }
+    );
+
+    if (pc.signalingState === 'stable') {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await addDoc(offersRef, {
+        offer: {
+          type: 'offer',
+          sdp: offer.sdp
+        },
+        userId: auth.currentUser.uid,
+        timestamp: serverTimestamp()
       });
-
-      socketRef.current.on('user joined', payload => {
-        const peer = addPeer(payload.signal, payload.callerID, stream);
-        setPeers(prevPeers => [...prevPeers, peer]);
-      });
-
-      setIsAudioEnabled(true);
-    } catch (error) {
-      console.error('Voice chat initialization error:', error);
-      alert('Could not start voice communication');
     }
-  };
 
-  // Create peer connection as initiator
-  const createPeer = (userToSignal, callerID, stream) => {
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream,
-    });
+    setIsAudioEnabled(true);
+    peerRef.current = pc;
 
-    peer.on('signal', signal => {
-      socketRef.current.emit('sending signal', { userToSignal, callerID, signal });
-    });
-
-    return peer;
-  };
-
-  // Add peer connection as receiver
-  const addPeer = (incomingSignal, callerID, stream) => {
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream,
-    });
-
-    peer.on('signal', signal => {
-      socketRef.current.emit('returning signal', { signal, callerID });
-    });
-
-    peer.signal(incomingSignal);
-    return peer;
-  };
+    return () => {
+      unsubscribeOffers();
+      pc.close();
+    };
+  } catch (error) {
+    console.error("Voice chat error:", error);
+    setIsAudioEnabled(false);
+  }
+};
 
   // Toggle voice communication
   const toggleAudio = () => {
     if (isAudioEnabled) {
-      localStream?.getTracks().forEach(track => track.stop());
-      peersRef.current.forEach(peerObj => peerObj.peer.destroy());
-      socketRef.current?.disconnect();
+      localStream?.getTracks().forEach((track) => track.stop());
+
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.srcObject = null;
+      }
+
       setIsAudioEnabled(false);
-      setPeers([]);
+      setLocalStream(null);
     } else {
       initVoiceChat();
     }
@@ -175,7 +220,7 @@ const ChatRoom = () => {
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   // Send message
@@ -191,8 +236,8 @@ const ChatRoom = () => {
       user: {
         id: auth.currentUser.uid,
         name: auth.currentUser.displayName || 'Anonymous',
-        avatar: auth.currentUser.photoURL
-      }
+        avatar: auth.currentUser.photoURL,
+      },
     });
 
     setNewMessage('');
@@ -252,8 +297,8 @@ const ChatRoom = () => {
           <button
             onClick={toggleAudio}
             className={`
-              ${isAudioEnabled 
-                ? 'text-[#2ECC71] hover:text-green-400' 
+              ${isAudioEnabled
+                ? 'text-[#2ECC71] hover:text-green-400'
                 : 'text-red-500 hover:text-red-400'
               } flex items-center gap-2
             `}
@@ -275,6 +320,8 @@ const ChatRoom = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      <audio ref={audioRef} style={{ display: 'none' }} />
+
       <form onSubmit={sendMessage} className="p-4 bg-[#2ECC71]/10">
         <div className="flex items-center space-x-4">
           <input
@@ -282,69 +329,19 @@ const ChatRoom = () => {
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type a message..."
-            className="flex-grow p-3 rounded-lg bg-[#2ECC71]/10 text-[#EAECEE] focus:outline-none focus:ring-2 focus:ring-[#2ECC71]"
+            className="flex-grow p-3 rounded-lg bg-[#2ECC71]/20 text-[#EAECEE]"
           />
           <button
             type="submit"
-            className="bg-[#2ECC71] text-[#1C1C1C] p-3 rounded-lg hover:bg-[#01FF70] transition"
+            disabled={!newMessage.trim()}
+            className="text-[#2ECC71] hover:text-green-400"
           >
             <Send size={20} />
           </button>
         </div>
       </form>
-
-      {isAudioEnabled && (
-        <div className="hidden">
-          {peers.map((peer, index) => (
-            <AudioStream key={index} peer={peer} />
-          ))}
-        </div>
-      )}
     </div>
   );
 };
-
-// Audio stream component
-const AudioStream = ({ peer }) => {
-  const audioRef = useRef();
-
-  useEffect(() => {
-    peer.on('stream', stream => {
-      audioRef.current.srcObject = stream;
-    });
-  }, [peer]);
-
-  return <audio ref={audioRef} autoPlay />;
-};
-
-// Message bubble component
-const MessageBubble = ({ message, isOwnMessage }) => (
-  <div className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-    <div
-      className={`
-        max-w-[70%] p-3 rounded-lg 
-        ${isOwnMessage
-          ? 'bg-[#2ECC71] text-[#1C1C1C]'
-          : 'bg-[#2ECC71]/10 text-[#EAECEE]'}
-      `}
-    >
-      {!isOwnMessage && (
-        <div className="flex items-center space-x-2 mb-1">
-          {message.user.avatar && (
-            <img
-              src={message.user.avatar}
-              alt={message.user.name}
-              className="w-6 h-6 rounded-full"
-            />
-          )}
-          <span className="text-sm font-semibold text-[#2ECC71]">
-            {message.user.name}
-          </span>
-        </div>
-      )}
-      <p>{message.text}</p>
-    </div>
-  </div>
-);
 
 export default ChatRoom;
