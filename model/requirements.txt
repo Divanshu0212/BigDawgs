@@ -1,8 +1,42 @@
-flask
-pandas
-firebase-admin
-scikit-learn
-requests
-flask-cors
-python-dotenv
-gunicorn
+# Web Framework
+Flask==3.0.2
+flask-cors==4.0.0
+gunicorn==21.2.0  # For production deployment
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.3
+scikit-learn==1.4.0
+
+# Firebase
+firebase-admin==6.4.0
+
+# HTTP Requests
+requests==2.31.0
+urllib3==2.2.0  # Required by requests
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# Production Dependencies
+werkzeug==3.0.1
+click==8.1.7
+itsdangerous==2.1.2
+
+# Async Support
+aiohttp==3.9.3  # For potential async operations
+typing-extensions==4.9.0
+
+# Performance & Monitoring
+cachetools==5.3.2  # For caching support
+prometheus-client==0.19.0  # For metrics (optional)
+
+# Development Dependencies
+pytest==8.0.0  # For testing
+black==24.1.1  # For code formatting
+flake8==7.0.0  # For linting
+mypy==1.8.0  # For type checking
+
+# Security
+certifi==2024.2.2
+cryptography==42.0.2
